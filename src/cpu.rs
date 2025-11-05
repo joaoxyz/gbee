@@ -54,7 +54,7 @@ impl CPU {
 
     pub fn fetch(&mut self) -> u8 {
         let byte = self.ram[self.pc as usize];
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         byte
     }
 
@@ -67,6 +67,16 @@ impl CPU {
                 let new_opcode = self.fetch();
                 self.decode_prefixed(new_opcode);
             },
+            // 16-bit register increment
+            0x03 => self.inst_inc_bc(),
+            0x13 => self.inst_inc_de(),
+            0x23 => self.inst_inc_hl(),
+            0x33 => self.inst_inc_sp(),
+            // 16-bit register decrement
+            0x0B => self.inst_dec_bc(),
+            0x1B => self.inst_dec_de(),
+            0x2B => self.inst_dec_hl(),
+            0x3B => self.inst_dec_sp(),
             0x40..=0x7F => {
                 // load
                 let src = opcode & 0b00000111;
@@ -331,6 +341,57 @@ impl CPU {
     fn inst_ld(dst: &mut u8, src: u8) {
         *dst = src;
     }
+
+    fn inst_inc_bc(&mut self) {
+        let result = CPU::join_u8(self.b, self.c).wrapping_add(1);
+
+        self.b = CPU::get_high(result);
+        self.c = CPU::get_low(result);
+    }
+    
+    fn inst_inc_de(&mut self) {
+        let result = CPU::join_u8(self.d, self.e).wrapping_add(1);
+
+        self.d = CPU::get_high(result);
+        self.e = CPU::get_low(result);
+    }
+    
+    fn inst_inc_hl(&mut self) {
+        let result = CPU::join_u8(self.h, self.l).wrapping_add(1);
+
+        self.h = CPU::get_high(result);
+        self.l = CPU::get_low(result);
+    }
+    
+    fn inst_inc_sp(&mut self) {
+        self.sp = self.sp.wrapping_add(1);
+    }
+    
+    fn inst_dec_bc(&mut self) {
+        let result = CPU::join_u8(self.b, self.c).wrapping_sub(1);
+
+        self.b = CPU::get_high(result);
+        self.c = CPU::get_low(result);
+    }
+    
+    fn inst_dec_de(&mut self) {
+        let result = CPU::join_u8(self.d, self.e).wrapping_sub(1);
+
+        self.d = CPU::get_high(result);
+        self.e = CPU::get_low(result);
+    }
+    
+    fn inst_dec_hl(&mut self) {
+        let result = CPU::join_u8(self.h, self.l).wrapping_add(1);
+
+        self.h = CPU::get_high(result);
+        self.l = CPU::get_low(result);
+    }
+    
+    fn inst_dec_sp(&mut self) {
+        self.sp = self.sp.wrapping_sub(1);
+    }
+    
 }
 
 #[repr(u8)]

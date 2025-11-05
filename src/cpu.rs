@@ -67,53 +67,59 @@ impl CPU {
                 let new_opcode = self.fetch();
                 self.decode_prefixed(new_opcode);
             },
-            0x40..=0x7F => todo!(), // load
+            0x40..=0x7F => {
+                // load
+                let src = opcode & 0b00000111;
+                let dst = opcode & 0b00111000;
+                let (dst, src) = self.decode_load_operands(dst, src);
+                CPU::inst_ld(dst, src);
+            },
             0x80..=0x87 => {
                 // add
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_add(rhs_value);
             },
             0x88..=0x8F => {
                 // add with carry
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_add_carry(rhs_value);
             }, 
             0x90..=0x97 => {
                 // sub
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_sub(rhs_value);
             },
             0x98..=0x9F => {
                 // sub with carry
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_sub_carry(rhs_value);
             }, 
             0xA0..=0xA7 => {
                 // and
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_and(rhs_value);
             },
             0xA8..=0xAF => {
                 // xor
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_xor(rhs_value);
             },
             0xB0..=0xB7 => {
                 // or
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_or(rhs_value);
             },
             0xB8..=0xBF => {
                 // compare
-                let register = opcode & 0b00000111;
-                let rhs_value = self.decode_alu_operand(register);
+                let rhs_value = opcode & 0b00000111;
+                let rhs_value = self.decode_alu_operand(rhs_value);
                 self.inst_compare(rhs_value);
             },
             _ => eprintln!("Unknown opcode: {opcode:#04X}"),
@@ -141,16 +147,32 @@ impl CPU {
         }
     }
 
-    fn decode_load_operands(&self, x: u8, y: u8) -> (&u8, u8) {
-        let src = match x { 
-            _ => todo!()
+    fn decode_load_operands(&mut self, dst: u8, src: u8) -> (&mut u8, u8) {
+        let src_decoded = match src {
+            0b000 => self.b,
+            0b001 => self.c,
+            0b010 => self.d,
+            0b011 => self.e,
+            0b100 => self.h,
+            0b101 => self.l,
+            0b110 => self.ram[CPU::join_u8(self.h, self.l) as usize],
+            0b111 => self.a,
+            n => panic!("Cannot match SRC operand for LD, {n:b}"),
         };
 
-        let dst = match y {
-            _ => todo!()
+        let dst_decoded = match dst { 
+            0b000 => &mut self.b,
+            0b001 => &mut self.c,
+            0b010 => &mut self.d,
+            0b011 => &mut self.e,
+            0b100 => &mut self.h,
+            0b101 => &mut self.l,
+            0b110 => &mut self.ram[CPU::join_u8(self.h, self.l) as usize],
+            0b111 => &mut self.a,
+            n => panic!("Cannot match DST operand for LD, {n:b}"),
         };
 
-        (dst, src)
+        (dst_decoded, src_decoded)
     }
 
     fn inst_add(&mut self, value: u8) {
@@ -308,7 +330,6 @@ impl CPU {
 
     fn inst_ld(dst: &mut u8, src: u8) {
         *dst = src;
-        todo!()
     }
 }
 

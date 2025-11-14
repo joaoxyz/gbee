@@ -9,10 +9,11 @@ fn main() -> io::Result<()> {
     let mut cpu: cpu::CPU = Default::default();
     cpu.load_rom(&boot_rom, 0);
 
-    for i in 0..200 {
+    for _i in 0..0xFFF {
         let a = cpu.fetch();
         cpu.decode(a);
     } 
 
+    // println!("{cpu:#?}");
     Ok(())
 }

@@ -1,5 +1,3 @@
-use core::panic;
-
 #[repr(u8)]
 #[derive(Debug)]
 enum Flags {
@@ -22,7 +20,7 @@ impl std::ops::BitAnd<Flags> for u8 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Register {
     B,
     C,
@@ -56,6 +54,19 @@ enum Address {
 #[derive(Clone, Copy)]
 struct Immediate;
 
+impl PartialEq<Register> for Immediate {
+    fn eq(&self, _: &Register) -> bool {
+        false
+    }
+}
+
+enum Condition {
+    Z,
+    NZ,
+    C,
+    NC,
+}
+
 trait Read<T: Copy> {
     fn read(&mut self, target: T) -> u8;
 }
@@ -70,6 +81,10 @@ trait Write<T: Copy> {
 
 trait WriteU16<T: Copy> {
     fn write_u16(&mut self, target: T, data: u16);
+}
+
+trait Eval {
+    fn eval(&self, condtion: Condition) -> bool;
 }
 
 #[derive(Debug)]
@@ -227,6 +242,17 @@ impl Write<Address> for Cpu {
     }
 }
 
+impl Eval for Cpu {
+    fn eval(&self, condition: Condition) -> bool {
+        match condition {
+            Condition::Z => (self.f & Flags::Zero) != 0,
+            Condition::NZ => (self.f & Flags::Zero) == 0,
+            Condition::C => (self.f & Flags::Carry) != 0,
+            Condition::NC => (self.f & Flags::Carry) == 0,
+        }
+    }
+}
+
 impl Cpu {
     pub fn load_rom(&mut self, rom: &[u8], pos: usize) {
         self.ram[pos..rom.len()].copy_from_slice(rom);
@@ -257,6 +283,13 @@ impl Cpu {
                 let new_opcode = self.fetch();
                 self.decode_prefixed_cb(new_opcode);
             },
+            // relative jumps
+            0x20 => self.inst_jr(Some(Condition::NZ)),
+            0x30 => self.inst_jr(Some(Condition::NC)),
+            0x18 => self.inst_jr(None),
+            0x28 => self.inst_jr(Some(Condition::Z)),
+            0x38 => self.inst_jr(Some(Condition::C)),
+            // 8-bit loads
             0x02 => self.inst_ld(Address::BC, Register::A),
             0x12 => self.inst_ld(Address::DE, Register::A),
             0x22 => self.inst_ld(Address::HLI, Register::A),
@@ -267,7 +300,6 @@ impl Cpu {
             0x3A => self.inst_ld(Register::A, Address::HLD),
             0xEA => self.inst_ld(Address::Immediate, Register::A),
             0xFA => self.inst_ld(Register::A, Address::Immediate),
-            // 8-bit immediate loads
             0x06 | 0x0E | 0x16 | 0x1E | 0x26 | 0x2E | 0x36 | 0x3E => {
                 let dst = Self::extract_operand((opcode & 0b0011_1000) >> 3);
                 self.inst_ld(dst, Immediate);
@@ -526,7 +558,7 @@ impl Cpu {
         self.f = flags;
     }
 
-    fn inst_sbc<T: Copy>(&mut self, operand: T) where Self: Read<T> {
+    fn inst_sbc<T: Copy + PartialEq<Register>>(&mut self, operand: T) where Self: Read<T> {
         let mut flags = 0u8;
 
         let value = self.read(operand);
@@ -544,8 +576,8 @@ impl Cpu {
         }
 
         // if any of the two subs underflow we should set carry
-        // according to opcode table "SBC A, A" does not affect the carry flag, look this up later
-        if carry0 || carry1 {
+        // "SBC A, A" does not affect the carry flag
+        if operand != Register::A && (carry0 || carry1) {
             flags |= Flags::Carry;
         }
 
@@ -936,6 +968,19 @@ impl Cpu {
         let value = self.read(reg);
         let result = value | (1 << test_bit);
         self.write(reg, result);
+    }
+
+    fn inst_jr(&mut self, condition_code: Option<Condition>) {
+        let offset = self.fetch() as i8; // signed offset
+        match condition_code {
+            Some(cond) => {
+                if self.eval(cond) {
+                    // hacky solution, TODO fix this
+                    self.pc = (self.pc as i16).wrapping_add(offset as i16) as u16;
+                }
+            },
+            None => self.pc = (self.pc as i16).wrapping_add(offset as i16) as u16,
+        }
     }
 }
 

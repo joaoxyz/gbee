@@ -39,6 +39,7 @@ enum Register16 {
     HL,
     AF,
     SP,
+    PC,
 }
 
 #[derive(Clone, Copy)]
@@ -49,6 +50,8 @@ enum Address {
     HLI,
     HLD,
     Immediate,
+    HRAM,
+    HRAM_C,
 }
 
 #[derive(Clone, Copy)]
@@ -145,6 +148,7 @@ impl ReadU16<Register16> for Cpu {
             Register16::HL => u16::from_le_bytes([self.l, self.h]),
             Register16::AF => u16::from_le_bytes([self.f, self.a]),
             Register16::SP => self.sp,
+            Register16::PC => self.pc,
         }
     }
 }
@@ -172,7 +176,15 @@ impl Read<Address> for Cpu {
             Address::Immediate => {
                 let offset = self.fetch_u16();
                 self.ram[offset as usize]
-            }
+            },
+            Address::HRAM => {
+                let offset = 0xFF00u16.wrapping_add(self.fetch() as u16);
+                self.ram[offset as usize]
+            },
+            Address::HRAM_C => {
+                let offset = 0xFF00u16.wrapping_add(self.c as u16);
+                self.ram[offset as usize]
+            },
         }
     }
 }
@@ -212,6 +224,7 @@ impl WriteU16<Register16> for Cpu {
             Register16::HL => [self.l, self.h] = u16::to_le_bytes(value),
             Register16::AF => [self.f, self.a] = u16::to_le_bytes(value),
             Register16::SP => self.sp = value,
+            Register16::PC => self.pc = value,
         }
     }
 }
@@ -238,6 +251,14 @@ impl Write<Address> for Cpu {
                 let offset = self.fetch_u16();
                 self.ram[offset as usize] = value;
             }
+            Address::HRAM => {
+                let offset = 0xFF00u16.wrapping_add(self.fetch() as u16);
+                self.ram[offset as usize] = value;
+            },
+            Address::HRAM_C => {
+                let offset = 0xFF00u16.wrapping_add(self.c as u16);
+                self.ram[offset as usize] = value;
+            },
         }
     }
 }
@@ -304,6 +325,10 @@ impl Cpu {
                 let dst = Self::extract_operand((opcode & 0b0011_1000) >> 3);
                 self.inst_ld(dst, Immediate);
             },
+            0xE0 => self.inst_ld(Address::HRAM, Register::A),
+            0xF0 => self.inst_ld(Register::A, Address::HRAM),
+            0xE2 => self.inst_ld(Address::HRAM_C, Register::A),
+            0xF2 => self.inst_ld(Register::A, Address::HRAM_C),
             0x27 => self.inst_daa(),
             0x37 => self.inst_scf(),
             // 16-bit register increment
@@ -335,6 +360,35 @@ impl Cpu {
             0x11 => self.inst_ld_u16(Register16::DE, Immediate),
             0x21 => self.inst_ld_u16(Register16::HL, Immediate),
             0x31 => self.inst_ld_u16(Register16::SP, Immediate),
+            // 8-bit register increment
+            0x04 => self.inst_inc(Register::B),
+            0x14 => self.inst_inc(Register::D),
+            0x24 => self.inst_inc(Register::H),
+            0x34 => self.inst_inc(Register::FromHL),
+            0x0C => self.inst_inc(Register::C),
+            0x1C => self.inst_inc(Register::E),
+            0x2C => self.inst_inc(Register::L),
+            0x3C => self.inst_inc(Register::A),
+            // 8-bit register decrement
+            0x05 => self.inst_dec(Register::B),
+            0x15 => self.inst_dec(Register::D),
+            0x25 => self.inst_dec(Register::H),
+            0x35 => self.inst_dec(Register::FromHL),
+            0x0D => self.inst_dec(Register::C),
+            0x1D => self.inst_dec(Register::E),
+            0x2D => self.inst_dec(Register::L),
+            0x3D => self.inst_dec(Register::A),
+            0xCD => self.inst_call(),
+            0xC5 => self.inst_push(Register16::BC),
+            0xD5 => self.inst_push(Register16::DE),
+            0xE5 => self.inst_push(Register16::HL),
+            0xF5 => self.inst_push(Register16::AF),
+            0xC1 => self.inst_pop(Register16::BC),
+            0xD1 => self.inst_pop(Register16::DE),
+            0xE1 => self.inst_pop(Register16::HL),
+            0xF1 => self.inst_pop(Register16::AF),
+            0x17 => self.inst_rla(),
+            0xC9 => self.inst_ret(),
             0x40..=0x7F => {
                 // reg to reg 8-bit loads
                 let dst = (opcode & 0b00111000) >> 3;
@@ -751,22 +805,6 @@ impl Cpu {
         self.f = flags;
     }
 
-    // fn inst_load_bc(&mut self, value: u16) {
-    //     (self.b, self.c) = split_u16(value);
-    // }
-
-    // fn inst_load_de(&mut self, value: u16) {
-    //     (self.d, self.e) = split_u16(value);
-    // }
-
-    // fn inst_load_hl(&mut self, value: u16) {
-    //     (self.h, self.l) = split_u16(value);
-    // }
-
-    // fn inst_load_sp(&mut self, value: u16) {
-    //     self.sp = value;
-    // }
-
     fn inst_rrca(&mut self) {
         let mut flags = 0u8;
         let shifted_bit = self.a & 1;
@@ -847,6 +885,22 @@ impl Cpu {
         }
 
         self.write(reg, result);
+        self.f = flags;
+    }
+
+    fn inst_rla(&mut self) {
+        let mut flags = 0u8;
+
+        let old_value = self.a;
+        let shifted_bit = (old_value & 0b1000_0000) >> 7;
+        let old_carry = ((self.f & Flags::Carry) > 0) as u8;
+        let result = (old_value << 1) & old_carry;
+
+        if shifted_bit == 1 {
+            flags |= Flags::Carry;
+        }
+
+        self.a = result;
         self.f = flags;
     }
 
@@ -981,5 +1035,86 @@ impl Cpu {
             },
             None => self.pc = (self.pc as i16).wrapping_add(offset as i16) as u16,
         }
+    }
+
+    fn inst_inc<T: Copy>(&mut self, operand: T) where Self: Write<T> + Read<T> {
+        let mut flags = self.f & Flags::Carry;
+
+        let value = self.read(operand);
+        let result = value.wrapping_add(1);
+
+        if result == 0 {
+            flags |= Flags::Zero
+        }
+
+        if ((value & 0b1111) + 1) > 0b1111 {
+            flags |= Flags::HalfCarry;
+        }
+
+        self.write(operand, result);
+        self.f = flags;
+    }
+
+    fn inst_dec<T: Copy>(&mut self, operand: T) where Self: Write<T> + Read<T> {
+        let mut flags = self.f & Flags::Carry;
+
+        let value = self.read(operand);
+        let result = value.wrapping_sub(1);
+
+        if result == 0 {
+            flags |= Flags::Zero
+        }
+
+        if (value & 0b1111) < 1 {
+            flags |= Flags::HalfCarry;
+        }
+
+        flags |= Flags::Subtraction;
+
+        self.write(operand, result);
+        self.f = flags;
+    }
+
+    fn inst_call(&mut self) {
+        let addr = self.fetch_u16();
+        let [low, high] = u16::to_le_bytes(self.pc);
+
+        self.sp = self.sp.wrapping_sub(1);
+        self.ram[self.sp as usize] = high;
+
+        self.sp = self.sp.wrapping_sub(1);
+        self.ram[self.sp as usize] = low;
+
+        self.pc = addr;
+    }
+
+    fn inst_push(&mut self, operand: Register16) {
+        let [low, high] = u16::to_le_bytes(self.read_u16(operand));
+
+        self.sp = self.sp.wrapping_sub(1);
+        self.ram[self.sp as usize] = high;
+
+        self.sp = self.sp.wrapping_sub(1);
+        self.ram[self.sp as usize] = low;
+    }
+
+    fn inst_pop(&mut self, operand: Register16) {
+        let low = self.ram[self.sp as usize];
+        self.sp = self.sp.wrapping_add(1);
+
+        let high = self.ram[self.sp as usize];
+        self.sp = self.sp.wrapping_add(1);
+
+        self.write_u16(operand, u16::from_le_bytes([low, high]));
+    }
+
+    fn inst_ret(&mut self) {
+        let low = self.ram[self.sp as usize];
+        self.sp = self.sp.wrapping_add(1);
+
+        let high = self.ram[self.sp as usize];
+        self.sp = self.sp.wrapping_add(1);
+
+        self.write_u16(Register16::PC, u16::from_le_bytes([low, high]));
     }
 }
